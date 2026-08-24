@@ -1,0 +1,1 @@
+"""Storefront email workflow example."""

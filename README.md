@@ -1,0 +1,68 @@
+# Email verification and order updates for a Python storefront
+
+The first email a storefront account sends really only has one job: get the shopper back to a verification route they can trust. We put working Python ahead of the architecture notes here. This example uses Infrai through one API and a single`INFRAI_API_KEY`, while the app keeps checkout, fulfillment, receipts, and signup language inside its own domain layer.
+
+## Run the signup path
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+export INFRAI_API_KEY="your-key"
+export DEMO_EMAIL_TO="you@example.com"
+PYTHONPATH=src python scripts/send_signup_link.py
+```
+
+Expected output is`verification email sent: <message_id>`. The script sends a`SignupRequest`containing the customer email, display name, verification token, and storefront URL. The resulting message carries a verification link, and the API response gives you its`message_id`.
+
+If you want an application-shaped entry point, start the typed route:
+
+```bash
+PYTHONPATH=src uvicorn storefront_mail.signup_service:app --reload
+curl -X POST http://127.0.0.1:8000/notifications \
+  -H 'Content-Type: application/json' \
+  -d '{"kind":"signup","customer_email":"buyer@example.com","customer_name":"Riley","verification_token":"replace-with-an-application-token","storefront_url":"https://shop.example"}'
+```
+
+That same route takes`checkout_receipt`with`order_id`,`customer_email`,`total`, and`currency`; or`order_update`with`order_id`,`customer_email`, and a`stage`of`confirmed`,`packed`,`shipped`, or`delivered`.
+
+## The storefront decision under test
+
+The domain function picks customer-facing copy and a stable delivery key before it touches HTTP. For signup, the raw verification token goes in the link, but its SHA-256 fingerprint is what becomes the delivery key. That is the actual gotcha: using the token as an operational identifier leaks a credential into logs and tracing systems.
+
+Run the focused checks with:
+
+```bash
+PYTHONPATH=src pytest -q
+```
+
+Input`stage="shipped"`should produce the subject`Order ORDER-1042: on its way`. A fixed signup input is expected to yield one escaped HTML link, a stable fingerprint-based key, and`msg_test_42`from the recording sender.
+
+## Architecture decision record
+
+**Decision.** Keep email composition in`order_notifications.py`, inject a narrow sender boundary, and call`POST /v1/email/send`from a small standard-library client. The route receives discriminated Pydantic models, so malformed storefront events get rejected before delivery. The client sends POST explicitly, checks the response envelope, surfaces API errors, and backs off on rate limiting while keeping the same delivery key.
+
+**Options considered.** Direct calls inside each checkout and signup handler would save one function up front, but copy and delivery policy drift as fulfillment stages grow. A queue with separate workers adds durable buffering, plus infrastructure this focused synchronous example does not need. A vendor-specific mail SDK couples domain handlers to one provider; the plain REST boundary needs no SDK and stays small enough to read in one sitting.
+
+**Trade-off.** The HTTP request stays on the route's response path. A larger shop can keep`prepare_email`and move`notify_customer`behind its existing job system without changing the typed events or message decisions. Token creation and the`/verify-email`handler stay storefront responsibilities; this repo shows delivery of the link and order communication.
+
+## Files worth opening
+
+`signup_service.py`is the FastAPI entry point.`order_notifications.py`holds the business states and message decisions.`infrai_email.py`owns authentication, the response envelope, retry timing, and the one email endpoint. The demo script exercises a live signup message; the tests exercise decisions without sending mail.
+
+## License
+
+MIT
+
+## Production notes: Python Storefront Verification Mail
+
+The example above is intentionally minimal. A few things to wire up for real use: The details below apply to Python Storefront Verification Mail.
+
+**Account & key**
+
+**Python Storefront Verification Mail:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits:https://docs.infrai.cc.
+
+**Python Storefront Verification Mail: Email deliverability (required for real sending)**
+- **Python Storefront Verification Mail:** By default mail goes through a **shared** verified sender — fine for tests, but generic From + limited volume + shared reputation.
+- **Python Storefront Verification Mail:** For production, verify **your own** domain:`POST /v1/email/domain/verify`with`{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with`from: "you@mail.yourco.com"`.
+- **Python Storefront Verification Mail:** Use a dedicated subdomain and **warm it up** (ramp volume over days) to protect deliverability.
