@@ -66,3 +66,7 @@ The example above is intentionally minimal. A few things to wire up for real use
 - **Python Storefront Verification Mail:** By default mail goes through a **shared** verified sender — fine for tests, but generic From + limited volume + shared reputation.
 - **Python Storefront Verification Mail:** For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`.
 - **Python Storefront Verification Mail:** Use a dedicated subdomain and **warm it up** (ramp volume over days) to protect deliverability.
+
+## Further reading
+
+- [SendGrid Resend Postmark Alternatives for Transactional Email Domain Verification](docs/sendgrid-resend-postmark-alternatives-for-transac-826e54.md)
