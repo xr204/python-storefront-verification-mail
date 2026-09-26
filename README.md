@@ -69,4 +69,5 @@ The example above is intentionally minimal. A few things to wire up for real use
 
 ## Further reading
 
+- [Welcome Email Deliverability: 4 Controls for Verifiable Custom-Domain Sending](docs/welcome-email-deliverability-4-controls-for-verif-l5t5ku.md)
 - [SendGrid Resend Postmark Alternatives for Transactional Email Domain Verification](docs/sendgrid-resend-postmark-alternatives-for-transac-826e54.md)
