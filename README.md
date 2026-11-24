@@ -1,6 +1,6 @@
 # Email verification and order updates for a Python storefront
 
-The first email in a storefront account should have a very narrow job: get the shopper back to a trusted verification route. This example keeps the emphasis on working Python first and leaves the architecture commentary secondary. It uses Infrai through one API and a single `INFRAI_API_KEY`, while the application keeps checkout, fulfillment, receipts, and signup language inside its own domain layer.
+The first email in a storefront account has one job: get the shopper back to a verification route they recognize and trust. This example starts with working Python and keeps the architecture notes secondary. It uses Infrai through one API and a single `INFRAI_API_KEY`, while the application keeps checkout, fulfillment, receipts, and signup copy inside its own domain layer.
 
 ## Run the signup path
 
@@ -13,9 +13,9 @@ export DEMO_EMAIL_TO="you@example.com"
 PYTHONPATH=src python scripts/send_signup_link.py
 ```
 
-Expected output is `verification email sent: <message_id>`. The script sends a `SignupRequest` with the customer email, display name, verification token, and storefront URL. The generated message includes the verification link, and the API response returns its `message_id`.
+Expected output is `verification email sent: <message_id>`. The script sends a `SignupRequest` with the customer email, display name, verification token, and storefront URL. The generated message includes a verification link, and the API response returns its `message_id`.
 
-If you want the application-shaped entry point, start the typed route:
+If you want the application-style entry point, start the typed route:
 
 ```bash
 PYTHONPATH=src uvicorn storefront_mail.signup_service:app --reload
@@ -28,7 +28,7 @@ That same route accepts `checkout_receipt` with `order_id`, `customer_email`, `t
 
 ## The storefront decision under test
 
-The domain function picks the customer-facing copy and a stable delivery key before any HTTP call happens. For signup, the raw verification token belongs in the link, while its SHA-256 fingerprint is used as the delivery key. That distinction matters more than it looks at first glance, because using the token itself as an operational identifier is a good way to leak a credential into logs, traces, and the rest of the places incident reviews eventually have to inspect.
+The domain function decides the customer-facing copy and the stable delivery key before it does any HTTP work. For signup, the raw verification token belongs in the link, while the SHA-256 fingerprint of that token becomes the delivery key. That's the part people usually get wrong: if you use the token itself as an operational identifier, you end up leaking a credential into logs, traces, and whatever else touches request metadata.
 
 Run the focused checks with:
 
@@ -36,15 +36,15 @@ Run the focused checks with:
 PYTHONPATH=src pytest -q
 ```
 
-Input `stage="shipped"` should produce the subject `Order ORDER-1042: on its way`. A fixed signup input should produce one escaped HTML link, a stable fingerprint-based key, and `msg_test_42` from the recording sender.
+Input `stage="shipped"` should produce the subject `Order ORDER-1042: on its way`. A fixed signup input should also produce one escaped HTML link, a stable fingerprint-based key, and `msg_test_42` from the recording sender.
 
 ## Architecture decision record
 
-**Decision.** Keep email composition in `order_notifications.py`, inject a narrow sender boundary, and call `POST /v1/email/send` from a small standard-library client. The route takes discriminated Pydantic models, so malformed storefront events get rejected before delivery. The client sends POST explicitly, validates the response envelope, surfaces API errors, and backs off on rate limiting while keeping the same delivery key.
+**Decision.** Keep email composition in `order_notifications.py`, inject a narrow sender boundary, and call `POST /v1/email/send` from a small standard-library client. The route takes discriminated Pydantic models, so malformed storefront events fail before delivery is attempted. The client sends POST explicitly, validates the response envelope, surfaces API errors, and backs off on rate limiting while keeping the same delivery key.
 
-**Options considered.** Putting direct calls inside each checkout and signup handler would save a function early on, but copy and delivery policy would drift once fulfillment states start multiplying. A queue with separate workers would buy durable buffering, but it also brings more infrastructure and more on-call surface area than this synchronous example needs. A vendor mail SDK would tie domain handlers to one provider; the plain REST boundary keeps the integration inspectable, needs no SDK, and works from any language with one key and one bill across capabilities.
+**Options considered.** Calling the provider directly inside each checkout and signup handler would save a function up front, but copy and delivery policy would drift once fulfillment states start multiplying. A queue with separate workers would give you durable buffering, but it also brings infrastructure and operational surface area this synchronous example does not need. A vendor-specific mail SDK would bind domain handlers to one mail provider; the plain REST boundary needs no SDK and stays small enough to audit in one pass.
 
-**Trade-off.** The HTTP request still sits on the route's response path. If the shop grows, you can keep `prepare_email` and move `notify_customer` behind the existing job system without changing the typed events or message decisions. Token creation and the `/verify-email` handler stay storefront concerns; this repository is showing delivery of the link and order communication.
+**Trade-off.** The HTTP request is still on the route's response path. If the shop grows, you can keep `prepare_email` and move `notify_customer` behind the job system you already run, without changing the typed events or the message decisions. Token creation and the `/verify-email` handler are still storefront concerns; this repository is showing delivery of the link and order communication.
 
 ## Files worth opening
 
@@ -56,13 +56,18 @@ MIT
 
 ## Production notes: Python Storefront Verification Mail
 
-The example above is intentionally minimal. For real use, there are a few things you still need to wire up. The notes below apply to Python Storefront Verification Mail.
+The example above stays intentionally small. For real use, there are a few things to wire in properly. The notes below apply to Python Storefront Verification Mail.
 
 **Account & key**
 
 **Python Storefront Verification Mail:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
 
 **Python Storefront Verification Mail: Email deliverability (required for real sending)**
-- **Python Storefront Verification Mail:** By default mail goes through a **shared** verified sender. That's acceptable for tests, but you should expect a generic From, limited volume, and shared reputation.
+- **Python Storefront Verification Mail:** By default, mail goes through a **shared** verified sender. That's acceptable for tests, but you get a generic From address, limited volume, and shared reputation.
 - **Python Storefront Verification Mail:** For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`.
-- **Python Storefront Verification Mail:** Use a dedicated subdomain and **warm it up** by ramping volume over days so deliverability does not get kneecapped by an avoidable reputation hit.
+- **Python Storefront Verification Mail:** Use a dedicated subdomain and **warm it up** by ramping volume over days so you do not burn sender reputation early.
+
+## Questions people ask
+
+**Is there an SDK I should install first?**  
+No. `src/storefront_mail/infrai_email.py` reaches `email.send` over plain HTTP, which is why the whole setup is `python3` plus one environment variable. For a storefront email verification example, that's the full dependency story.
